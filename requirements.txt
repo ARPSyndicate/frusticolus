@@ -1,0 +1,15 @@
+aiohttp
+backoff
+easyocr
+nltk
+numpy
+opencv-python-headless
+os-urlpattern
+pillow
+puncia
+pyvirtualdisplay
+selenium
+selenium-screenshot
+selenium-wire
+tldextract
+tqdm
