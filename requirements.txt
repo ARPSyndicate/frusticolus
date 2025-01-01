@@ -1,4 +1,5 @@
 aiohttp
+aiohttp-socks
 backoff
 easyocr
 nltk

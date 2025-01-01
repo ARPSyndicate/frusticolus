@@ -19,6 +19,9 @@
 
 ## More from [A.R.P. Syndicate](https://www.arpsyndicate.io)
 
+- [Exploit Observer](https://exploit.observer)
+- [Subdomain Center](https://subdomain.center)
+- [VEDAS Advisories](https://vedas.arpsyndicate.io)
 - [Open Source Intelligence](https://asm.arpsyndicate.io/intelligence.html)
 - [Attack Surface Management](https://asm.arpsyndicate.io)
 

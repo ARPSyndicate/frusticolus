@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+from aiohttp_socks import ProxyConnector
 from backoff import on_exception, expo
 from collections import defaultdict
 from configparser import ConfigParser
@@ -52,7 +53,7 @@ start_time = time.time()
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-tqdm.write(BLUE + "Falco(F.)rusticolus [v1.0]" + CLEAR)
+tqdm.write(BLUE + "Falco(F.)rusticolus [v1.1]" + CLEAR)
 tqdm.write(BLUE + "A.R.P. Syndicate [https://www.arpsyndicate.io]" + CLEAR)
 tqdm.write(YELLOW + "An Intelligent URL Profiler" + CLEAR)
 
@@ -87,8 +88,13 @@ eshot = config.get("vars", "screenshot").lower()
 ocr = config.get("vars", "ocr").lower() == "true"
 headless = config.get("vars", "headless").lower() == "true"
 crawl = config.get("vars", "crawl").lower() == "true"
+replica = config.get("vars", "replica").lower() == "true"
 vulns = config.get("vars", "vulns").lower() == "true"
 proxy = config.get("vars", "proxy")
+tor = config.get("vars", "tor").lower() == "true"
+if tor:
+    proxy = "socks5h://127.0.0.1:9050"
+    os.system("sudo service tor start")
 timeout = max(100, int(config.get("vars", "timeout")))
 retries = int(config.get("vars", "retries"))
 browsers = int(config.get("vars", "concurrency"))
@@ -148,7 +154,6 @@ def ocr_analysis(image_path):
         ):
             result.append(tech.lower())
     result = list(set(result))
-    print(result)
     return result
 
 
@@ -625,29 +630,44 @@ async def is_live(url, session):
 
 
 async def check_subdomains(domain):
+    global proxy, timeout, replica
     subdomains = puncia.query_api("subdomain", domain)
+    if replica:
+        replicas = puncia.query_api("replica", domain)
+        subdomains.extend(replicas)
     live_subdomains = []
-
-    async with aiohttp.ClientSession() as session:
-        resolved_subdomains = [
-            subdomain
-            for subdomain, resolved in zip(
-                subdomains,
-                await asyncio.gather(*[resolve_subdomain(s) for s in subdomains]),
+    try:
+        session_timeout = aiohttp.ClientTimeout(sock_connect=timeout, sock_read=timeout)
+        if len(proxy) > 0 and (
+            "http://" in proxy or "socks5h://" in proxy or "socks5://" in proxy
+        ):
+            connc = ProxyConnector.from_url(
+                proxy.replace("socks5h://", "socks5://"), ssl=False, limit=browsers * 2
             )
-            if resolved
-        ]
-        probe_tasks = []
-        for subdomain in resolved_subdomains:
-            http_url = f"http://{subdomain}"
-            https_url = f"https://{subdomain}"
-            probe_tasks.append(is_live(http_url, session))
-            probe_tasks.append(is_live(https_url, session))
-        probe_results = await asyncio.gather(*probe_tasks)
-        for i in range(len(resolved_subdomains)):
-            if probe_results[i * 2] or probe_results[i * 2 + 1]:
-                live_subdomains.append(f"http://{resolved_subdomains[i]}")
-                live_subdomains.append(f"https://{resolved_subdomains[i]}")
+        async with aiohttp.ClientSession(
+            timeout=session_timeout, connector=connc
+        ) as session:
+            resolved_subdomains = [
+                subdomain
+                for subdomain, resolved in zip(
+                    subdomains,
+                    await asyncio.gather(*[resolve_subdomain(s) for s in subdomains]),
+                )
+                if resolved
+            ]
+            probe_tasks = []
+            for subdomain in resolved_subdomains:
+                http_url = f"http://{subdomain}"
+                https_url = f"https://{subdomain}"
+                probe_tasks.append(is_live(http_url, session))
+                probe_tasks.append(is_live(https_url, session))
+            probe_results = await asyncio.gather(*probe_tasks)
+            for i in range(len(resolved_subdomains)):
+                if probe_results[i * 2] or probe_results[i * 2 + 1]:
+                    live_subdomains.append(f"http://{resolved_subdomains[i]}")
+                    live_subdomains.append(f"https://{resolved_subdomains[i]}")
+    except:
+        pass
     return live_subdomains
 
 
@@ -662,7 +682,7 @@ async def hashSRC(session, url):
             },
             allow_redirects=True,
         ) as response:
-            html = await response.read()
+            html = await response.text()
             hashed = getMD5(html)
             if hashed in list(hashes.keys()):
                 hashes[hashed].append(url)
@@ -710,11 +730,17 @@ async def gather_with_concurrency(n, *coros):
 
 
 async def findSRCs(urls):
-    global timeout, browsers
+    global timeout, browsers, proxy
     session_timeout = aiohttp.ClientTimeout(sock_connect=timeout, sock_read=timeout)
+    connc = aiohttp.TCPConnector(ssl=False, limit=browsers * 2)
+    if len(proxy) > 0 and (
+        "http://" in proxy or "socks5h://" in proxy or "socks5://" in proxy
+    ):
+        connc = ProxyConnector.from_url(
+            proxy.replace("socks5h://", "socks5://"), ssl=False, limit=browsers * 2
+        )
     async with aiohttp.ClientSession(
-        timeout=session_timeout,
-        connector=aiohttp.TCPConnector(ssl=False, limit=browsers * 2),
+        timeout=session_timeout, connector=connc
     ) as session:
         tasks = []
         for tart in urls:
@@ -792,7 +818,7 @@ async def get_subdomain_urls(alldomains):
 
 
 def browser(tars):
-    global retries, pbar, captcha, metadata, mode, tmpdir, eshot, crawls, ocr, crawl, headless, fingerprints
+    global retries, pbar, captcha, metadata, mode, tmpdir, eshot, crawls, ocr, crawl, headless, fingerprints, proxy
     if headless:
         display = Display(visible=0, size=(1024, 768))
         display.start()
@@ -806,7 +832,9 @@ def browser(tars):
     options.add_argument("--high-dpi-support=1")
     options.add_argument("--force-device-scale-factor=1")
     try:
-        if len(proxy) > 0 and ("http://" in proxy or "socks://" in proxy):
+        if len(proxy) > 0 and (
+            "http://" in proxy or "socks5://" in proxy or "socks5h://" in proxy
+        ):
             proxy_options = {
                 "proxy": {
                     "http": proxy,
@@ -1087,6 +1115,8 @@ for rawd in raw_data:
 conn.commit()
 conn.close()
 os.system("rm -r " + tmpdir)
+if tor:
+    os.system("sudo service tor stop")
 tqdm.write(YELLOW + "[*] done" + CLEAR)
 duration = time.time() - start_time
 tqdm.write(YELLOW + f"[*] processed {ctar} targets in {duration} seconds" + CLEAR)
