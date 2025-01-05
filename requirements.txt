@@ -1,7 +1,9 @@
 aiohttp
 aiohttp-socks
 backoff
+blinker==1.7.0
 easyocr
+lxml
 nltk
 numpy
 opencv-python-headless
@@ -14,3 +16,4 @@ selenium-screenshot
 selenium-wire
 tldextract
 tqdm
+undetected_chromedriver

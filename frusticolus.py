@@ -41,6 +41,7 @@ import sqlite3
 import sys
 import time
 import tldextract
+import traceback
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -53,7 +54,7 @@ start_time = time.time()
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-tqdm.write(BLUE + "Falco(F.)rusticolus [v1.1]" + CLEAR)
+tqdm.write(BLUE + "Falco(F.)rusticolus [v1.2]" + CLEAR)
 tqdm.write(BLUE + "A.R.P. Syndicate [https://www.arpsyndicate.io]" + CLEAR)
 tqdm.write(YELLOW + "An Intelligent URL Profiler" + CLEAR)
 
@@ -98,6 +99,7 @@ if tor:
 timeout = max(100, int(config.get("vars", "timeout")))
 retries = int(config.get("vars", "retries"))
 browsers = int(config.get("vars", "concurrency"))
+batches = int(config.get("vars", "batch"))
 hashes = {}
 metadata = {}
 captcha = []
@@ -589,7 +591,7 @@ def make_entries(url):
 
 def getMD5(dta):
     try:
-        dta = codecs.encode(dta, "base64")
+        dta = codecs.encode(dta.encode(), "base64")
         return hashlib.md5(dta).hexdigest()
     except:
         return None
@@ -597,8 +599,9 @@ def getMD5(dta):
 
 def check_captcha(source):
     return (
-        "Verify you are human" in source
-        or "Enable JavaScript and cookies to continue" in source
+        "verify you are human" in source.lower()
+        or "enable javascript and cookies to continue" in source.lower()
+        or "enter the code" in source.lower()
     )
 
 
@@ -868,6 +871,7 @@ def browser(tars):
         ss = Screenshot.Screenshot()
     except Exception as ex:
         tqdm.write(RED + "[BROWSER EXCEPTION] - " + str(ex.__class__.__name__) + CLEAR)
+        tqdm.write(RED + traceback.format_exc() + CLEAR)
         return
     for target in tars:
         for retry in range(0, retries):
@@ -990,6 +994,7 @@ def browser(tars):
                 if retry >= retries - 1:
                     exc = "[{0}] {1}".format(str(ex.__class__.__name__), target)
                     tqdm.write(RED + exc + CLEAR)
+                    tqdm.write(RED + traceback.format_exc() + CLEAR)
                 continue
     save_raw_data(driver)
     driver.quit()
@@ -1048,9 +1053,12 @@ crawls = []
 tmpdir = tmpdir.strip("/") + "/"
 
 pbar = tqdm(total=len(targets), desc=YELLOW + "[*] fingerprinting" + CLEAR)
-asyncio.get_event_loop().run_until_complete(findSRCs(targets))
+asyncio.run(findSRCs(targets))
 pbar.close()
 pbar = tqdm(total=len(targets), desc=YELLOW + "[*] profiling" + CLEAR)
+
+for target in metadata:
+    make_entries(target)
 
 if mode == "smart":
     targets = []
@@ -1062,23 +1070,25 @@ if mode == "smart":
 
 targets = list(chunks(targets, browsers))
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=browsers) as executor:
-    try:
-        executor.map(browser, targets)
-    except (KeyboardInterrupt, SystemExit):
-        tqdm.write(RED + "[!] interrupted" + CLEAR)
-        executor.shutdown(wait=False)
-        sys.exit()
+for i in range(0, len(targets), batches):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=browsers) as executor:
+        try:
+            executor.map(browser, targets[i : i + batches])
+        except (KeyboardInterrupt, SystemExit):
+            tqdm.write(RED + "[!] interrupted" + CLEAR)
+            executor.shutdown(wait=False)
+            sys.exit()
 
-active = active_children()
-for child in active:
-    child.kill()
-for child in active:
-    child.join()
+    active = active_children()
+    for child in active:
+        child.kill()
+    for child in active:
+        child.join()
+
+    for target in metadata:
+        make_entries(target)
+
 pbar.close()
-
-for target in metadata:
-    make_entries(target)
 
 if crawl:
     crawls.extend(asyncio.run(get_subdomain_urls(list(etdoms))))
