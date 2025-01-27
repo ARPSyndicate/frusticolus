@@ -54,7 +54,7 @@ start_time = time.time()
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-tqdm.write(BLUE + "Falco(F.)rusticolus [v1.2]" + CLEAR)
+tqdm.write(BLUE + "Falco(F.)rusticolus [v1.3]" + CLEAR)
 tqdm.write(BLUE + "A.R.P. Syndicate [https://www.arpsyndicate.io]" + CLEAR)
 tqdm.write(YELLOW + "An Intelligent URL Profiler" + CLEAR)
 
@@ -159,23 +159,23 @@ def ocr_analysis(image_path):
     return result
 
 
-def get_null_urls(col, conn):
+def get_null_urls(col, conn, batch_size=1000):
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
     tables = cursor.fetchall()
-    union_query = " UNION ALL ".join(
-        [
-            f'SELECT url FROM "{table_name[0]}" WHERE {col} IS NULL OR {col} = ""'
-            for table_name in tables
-            if table_name[0] != "raw_data"
-        ]
-    )
     results = []
-    if union_query:
-        cursor.execute(union_query)
-        urls_with_empty_status = cursor.fetchall()
-        for (url,) in urls_with_empty_status:
-            results.append(url)
+
+    for table_name in tables:
+        if table_name[0] != "raw_data":
+            offset = 0
+            while True:
+                query = f'SELECT url FROM "{table_name[0]}" WHERE {col} IS NULL OR {col} = "" LIMIT {batch_size} OFFSET {offset};'
+                cursor.execute(query)
+                urls_with_empty_status = cursor.fetchall()
+                if not urls_with_empty_status:
+                    break
+                results.extend(url for (url,) in urls_with_empty_status)
+                offset += batch_size
     return results
 
 
@@ -495,7 +495,7 @@ def insert_data(
     force=False,
 ):
     screenshot_blob = ""
-    if len(screenshot_path) > 0:
+    if len(screenshot_path) > 0 and os.path.isfile(screenshot_path):
         with open(screenshot_path, "rb") as file:
             screenshot_blob = file.read()
     cookies_json = json.dumps(cookies)
